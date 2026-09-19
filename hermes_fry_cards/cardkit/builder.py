@@ -12,6 +12,7 @@ from .i18n import _LOCALES, _T, _i18n, _t
 from .markdown import (
     _downgrade_tables,
     _split_long_text,
+    clamp_utf8,
     optimize_markdown_style,
 )
 
@@ -38,21 +39,22 @@ def _truncate_model(name: str) -> str:
 
 
 def _display_model(name: str) -> str:
-    """模型显示名：别名优先（~/.hermes/model_aliases.json 子串匹配），未命中回落截断逻辑.
+    """模型显示名：别名优先（~/.hermes/model_aliases.json 子串匹配，支持时段人设），未命中回落截断.
 
-    别名文件由 Config().model_aliases() 每次重读（热更新）；命中即返回别名，
-    未命中且 truncate_model_name 开启时走 _truncate_model。
+    别名文件由 Config().model_aliases() 每次重读（热更新）；对象条目读取时按北京时间
+    解析为当前时段显示名。model_aliases_enabled 关闭时整体忽略别名回落截断。
     """
     if not name:
         return name
     from ..config import Config
 
     cfg = Config()
-    aliases = cfg.model_aliases()
-    lowered = name.lower()
-    for key, alias in aliases.items():
-        if key and key in lowered:
-            return alias
+    if cfg.model_aliases_enabled:
+        aliases = cfg.model_aliases()
+        lowered = name.lower()
+        for key, alias in aliases.items():
+            if key and key in lowered:
+                return alias
     if cfg.truncate_model_name:
         return _truncate_model(name)
     return name
@@ -637,6 +639,7 @@ def build_complete_card(
         elif seg.type == SegmentType.ANSWER and seg.text:
             has_answer = True
             content = _downgrade_tables(optimize_markdown_style(seg.text))
+            content = clamp_utf8(content, preserve_tail=True)
             for chunk in _split_long_text(content):
                 elements.append({"tag": "markdown", "content": chunk, "text_size": body_text_size})
 
@@ -815,7 +818,7 @@ def build_cron_card(
     summary = content[:120].replace("\n", " ").replace("```", "").strip()
     if summary:
         card["config"]["summary"] = {"content": summary}
-    for chunk in _split_long_text(optimize_markdown_style(content)):
+    for chunk in _split_long_text(clamp_utf8(optimize_markdown_style(content))):
         if chunk.strip():
             card["body"]["elements"].append({"tag": "markdown", "content": chunk})
     return card
@@ -835,7 +838,7 @@ def build_background_card(preview: str, content: str) -> dict[str, Any]:
     summary = body[:120].replace("\n", " ").replace("```", "").strip()
     if summary:
         card["config"]["summary"] = {"content": summary}
-    for chunk in _split_long_text(optimize_markdown_style(body)):
+    for chunk in _split_long_text(clamp_utf8(optimize_markdown_style(body))):
         if chunk.strip():
             card["body"]["elements"].append({"tag": "markdown", "content": chunk})
     return card
